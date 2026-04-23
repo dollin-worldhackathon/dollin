@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { LoginButton } from "./login-button";
 
 export default function LoginPage() {
   return (
@@ -9,7 +10,7 @@ export default function LoginPage() {
       </div>
       <Image src="/bigdoll.webp" width={320} height={400} alt="" />
       <div className="w-full h-fit flex flex-col gap-5 items-center justify-center">
-        <button className="font-bold w-11/12 bg-primary h-12 rounded-lg shadow-md">Login with WORLD</button>
+        <LoginButton />
       </div>
     </div>
   );

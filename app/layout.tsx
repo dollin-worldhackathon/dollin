@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Nunito } from "next/font/google";
+import { MiniKitProvider } from "./minikit-provider";
 import "./globals.css";
 
 const nunito = Nunito({
@@ -19,7 +20,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${nunito.variable} font-sans h-dvh antialiased`}>
-      <body className="h-dvh w-full">{children}</body>
+      <body className="h-dvh w-full">
+          <MiniKitProvider>{children}</MiniKitProvider>
+        </body>
     </html>
   );
 }
