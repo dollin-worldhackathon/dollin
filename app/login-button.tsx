@@ -7,16 +7,12 @@ import { useState } from "react";
 export function LoginButton() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleLogin() {
     setLoading(true);
+    setError(null);
     try {
-      // 개발 환경에서는 walletAuth를 우회하고 바로 이동
-      if (process.env.NODE_ENV === "development") {
-        router.push("/chats");
-        return;
-      }
-
       const res = await fetch("/api/nonce");
       const { nonce } = await res.json();
 
@@ -37,19 +33,26 @@ export function LoginButton() {
       const { isValid } = await verifyRes.json();
       if (isValid) {
         router.push("/chats");
+      } else {
+        setError("인증에 실패했습니다. 다시 시도해주세요.");
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "오류가 발생했습니다.");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <button
-      onClick={handleLogin}
-      disabled={loading}
-      className="font-bold w-11/12 bg-primary h-12 rounded-lg shadow-md disabled:opacity-60"
-    >
-      {loading ? "로그인 중..." : "Login with WORLD"}
-    </button>
+    <div className="w-full flex flex-col items-center gap-2">
+      <button
+        onClick={handleLogin}
+        disabled={loading}
+        className="font-bold w-11/12 bg-primary h-12 rounded-lg shadow-md disabled:opacity-60"
+      >
+        {loading ? "로그인 중..." : "Login with WORLD"}
+      </button>
+      {error && <p className="text-red-500 text-sm">{error}</p>}
+    </div>
   );
 }

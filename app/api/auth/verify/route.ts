@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { MiniAppWalletAuthSuccessPayload, verifySiweMessage } from "@worldcoin/minikit-js";
+import { MiniAppWalletAuthSuccessPayload } from "@worldcoin/minikit-js";
+import { verifySiweMessage } from "@worldcoin/minikit-js/siwe";
 
 type RequestBody = {
   payload: MiniAppWalletAuthSuccessPayload;
@@ -27,13 +28,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ isValid: false }, { status: 400 });
     }
 
+    const address = verification.siweMessageData.address;
     cookieStore.delete("siwe");
-    // TODO: 세션/JWT 발급 등 추가 인증 처리
-
-    return NextResponse.json({
-      isValid: true,
-      address: verification.siweMessageData.address,
+    cookieStore.set("session", address, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 60 * 60 * 24 * 7, // 7일
     });
+
+    return NextResponse.json({ isValid: true, address });
   } catch (error) {
     return NextResponse.json(
       {
