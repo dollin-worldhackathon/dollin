@@ -1,6 +1,8 @@
-// POST /api/auth/logout
-// body: 없음
-// 세션 쿠키 삭제
-// return: { ok: true }
+import { cookies } from 'next/headers'
+import { NextResponse } from 'next/server'
 
-export async function POST() {}
+export async function POST() {
+  const cookieStore = await cookies()
+  cookieStore.delete('session')
+  return NextResponse.json({ ok: true })
+}
