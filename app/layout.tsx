@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Nunito } from "next/font/google";
+import { MiniKitProvider } from "@worldcoin/minikit-js/minikit-provider";
 import "./globals.css";
 
 const nunito = Nunito({
@@ -19,7 +20,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${nunito.variable} font-sans h-dvh antialiased`}>
-      <body className="h-dvh w-full">{children}</body>
+      <body className="h-dvh w-full">
+        <MiniKitProvider props={{ appId: process.env.NEXT_PUBLIC_APP_ID }}>
+          {children}
+        </MiniKitProvider>
+      </body>
     </html>
   );
 }

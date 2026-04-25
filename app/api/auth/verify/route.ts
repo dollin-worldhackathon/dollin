@@ -1,8 +1,51 @@
-// POST /api/auth/verify
-// body: { payload } — MiniKit.commandsAsync.walletAuth 결과값
-// 1. World ID proof 검증
-// 2. walletAddress 기준으로 유저 조회 or 신규 생성
-// 3. 세션 쿠키 발급
-// return: { ok: true }
+import { cookies } from 'next/headers'
+import { NextRequest, NextResponse } from 'next/server'
+import { verifySiweMessage } from '@worldcoin/minikit-js/siwe'
 
-export async function POST() {}
+type WalletAuthPayload = {
+  message: string
+  signature: string
+  address?: string
+  status?: string
+}
+
+type RequestBody = {
+  payload: WalletAuthPayload
+  nonce: string
+}
+
+export async function POST(req: NextRequest) {
+  const { payload, nonce } = (await req.json()) as RequestBody
+
+  const cookieStore = await cookies()
+  const storedNonce = cookieStore.get('siwe')?.value
+
+  if (!storedNonce || nonce !== storedNonce) {
+    return NextResponse.json({ isValid: false, error: 'Invalid nonce' }, { status: 400 })
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const verification = await verifySiweMessage(payload as any, nonce)
+
+    if (!verification.isValid) {
+      return NextResponse.json({ isValid: false }, { status: 400 })
+    }
+
+    const address = verification.siweMessageData.address ?? ''
+    cookieStore.delete('siwe')
+    cookieStore.set('session', address, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 60 * 60 * 24 * 7,
+    })
+
+    return NextResponse.json({ isValid: true, address })
+  } catch (error) {
+    return NextResponse.json(
+      { isValid: false, error: error instanceof Error ? error.message : 'Verification failed' },
+      { status: 400 }
+    )
+  }
+}

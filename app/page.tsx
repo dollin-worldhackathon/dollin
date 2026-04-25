@@ -1,21 +1,47 @@
 'use client'
 
-// 로그인 플로우
-// 1. MiniKit.commandsAsync.walletAuth({ nonce }) — World ID SDK 사용
-// 2. 서명된 payload를 POST /api/auth/verify 로 전달
-// 3. 서버에서 proof 검증 + 세션 쿠키 발급
-// 4. router.push('/chats') 로 이동
-
 import Image from 'next/image'
+import { MiniKit } from '@worldcoin/minikit-js'
 import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 
 export default function LoginPage() {
   const router = useRouter()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function handleWorldId() {
-    // TODO: const { finalPayload } = await MiniKit.commandsAsync.walletAuth({ nonce: uuid() })
-    // TODO: await fetch('/api/auth/verify', { method: 'POST', body: JSON.stringify(finalPayload) })
-    // TODO: router.push('/chats')
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/nonce')
+      const { nonce } = await res.json()
+
+      const result = await MiniKit.walletAuth({
+        nonce,
+        statement: 'Sign in to Dollin',
+        expirationTime: new Date(Date.now() + 1000 * 60 * 60),
+      })
+
+      if (result.executedWith === 'fallback') return
+
+      const verifyRes = await fetch('/api/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload: result.data, nonce }),
+      })
+
+      const { isValid } = await verifyRes.json()
+      if (isValid) {
+        router.push('/chats')
+      } else {
+        setError('인증에 실패했습니다. 다시 시도해주세요.')
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '오류가 발생했습니다.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -34,10 +60,12 @@ export default function LoginPage() {
       <div className="px-6 pb-12 flex flex-col gap-3">
         <button
           onClick={handleWorldId}
-          className="w-full bg-primary text-foreground font-bold py-4 rounded-2xl text-[15px]"
+          disabled={loading}
+          className="w-full bg-primary text-foreground font-bold py-4 rounded-2xl text-[15px] disabled:opacity-60"
         >
-          Continue with World ID
+          {loading ? 'Signing in...' : 'Continue with World ID'}
         </button>
+        {error && <p className="text-red-500 text-sm text-center">{error}</p>}
         <button
           onClick={() => router.push('/chats')} // 개발용 임시 — 나중에 지우기
           className="w-full text-muted text-[13px] py-2"

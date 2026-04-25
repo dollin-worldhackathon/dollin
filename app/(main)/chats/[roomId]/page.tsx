@@ -1,17 +1,9 @@
 'use client'
 
-// GET /api/chats/[roomId] → { room: { title, partnerAge, partnerGender, msgCount, msgLimit } }
-// GET /api/chats/[roomId]/messages → { messages: Message[] }
-// 실시간 연결: ws://... 웹소켓 또는 /api/chats/[roomId]/stream SSE 방식
-// 메시지 전송: POST /api/chats/[roomId]/messages { text } → UI 옵티미스틱 업데이트
-// 이미지 전송: POST /api/upload → { url } → type:'image' 메시지로 전송
-
-// 코인 전송
-// MiniKit.commandsAsync.pay({ amount, to: 상대방 지갑 주소, token: 'WLD' })
-// 결제 완료 후 POST /api/chats/[roomId]/extend { amount } → 서버에서 메시지 한도 늘려줌
-
-import { use, useState } from 'react'
+import { use, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { MiniKit } from '@worldcoin/minikit-js'
+import { Tokens, tokenToDecimals } from '@worldcoin/minikit-js/commands'
 
 // API 연결 전 임시 더미 데이터
 const mockMessages = [
@@ -21,31 +13,84 @@ const mockMessages = [
   { id: 4, type: 'sent', text: "Work is overwhelming and people around me\nare draining me. Every day feels heavy 😢", time: '3:23 PM' },
 ]
 
+// TODO: 실제 방 데이터에서 가져올 상대방 지갑 주소
+const PARTNER_WALLET_PLACEHOLDER = '0x0000000000000000000000000000000000000000'
+
 export default function ChatRoomPage({ params }: { params: Promise<{ roomId: string }> }) {
   const { roomId } = use(params)
   const router = useRouter()
 
   const [showCoinModal, setShowCoinModal] = useState(false)
   const [coinAmount, setCoinAmount] = useState(20)
+  const [memo, setMemo] = useState('')
   const [text, setText] = useState('')
+  const [msgLimit, setMsgLimit] = useState(50)
+  const [coinLoading, setCoinLoading] = useState(false)
+  const [coinError, setCoinError] = useState<string | null>(null)
+  const [balance, setBalance] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch('/api/users/me/balance')
+      .then((r) => r.json())
+      .then(({ balance: bal }) => setBalance(bal))
+      .catch(() => setBalance('0'))
+  }, [])
 
   async function sendMessage() {
     if (!text.trim()) return
     // TODO: await fetch(`/api/chats/${roomId}/messages`, { method: 'POST', body: JSON.stringify({ text }) })
-    // TODO: 메시지 목록에 옵티미스틱 추가
     setText('')
   }
 
   async function sendCoin() {
-    // TODO: const { finalPayload } = await MiniKit.commandsAsync.pay({
-    //   amount: coinAmount,
-    //   to: partnerWalletAddress, // room 데이터에서 가져옴
-    //   token: 'WLD',
-    //   description: memo,
-    // })
-    // TODO: await fetch(`/api/chats/${roomId}/extend`, { method: 'POST', body: JSON.stringify({ amount: coinAmount, payload: finalPayload }) })
-    // TODO: UI에서 메시지 한도 업데이트
-    setShowCoinModal(false)
+    setCoinLoading(true)
+    setCoinError(null)
+    try {
+      let payload: Record<string, string>
+
+      if (process.env.NODE_ENV === 'development') {
+        // 개발 bypass: MiniKit.pay() 없이 바로 extend 호출
+        payload = { transactionId: 'dev-bypass', reference: 'dev-bypass' }
+      } else {
+        // reference는 서버에서 발급 (replay attack 방지)
+        const refRes = await fetch('/api/pay-reference')
+        const { reference } = await refRes.json()
+
+        const result = await MiniKit.pay({
+          reference,
+          to: PARTNER_WALLET_PLACEHOLDER,
+          tokens: [{ symbol: Tokens.WLD, token_amount: tokenToDecimals(coinAmount, Tokens.WLD).toString() }],
+          description: memo || `Extend chat by ${coinAmount} messages`,
+        })
+
+        if (result.executedWith !== 'minikit') {
+          setCoinError('결제가 취소되었습니다.')
+          return
+        }
+        payload = result.data as unknown as Record<string, string>
+      }
+
+      const res = await fetch(`/api/chats/${roomId}/extend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: coinAmount, payload }),
+      })
+
+      if (!res.ok) {
+        const { error } = await res.json()
+        setCoinError(error ?? '결제 검증에 실패했습니다.')
+        return
+      }
+
+      const { msgLimit: newLimit } = await res.json()
+      setMsgLimit(newLimit)
+      setShowCoinModal(false)
+      setMemo('')
+    } catch (e) {
+      setCoinError(e instanceof Error ? e.message : '오류가 발생했습니다.')
+    } finally {
+      setCoinLoading(false)
+    }
   }
 
   return (
@@ -69,17 +114,17 @@ export default function ChatRoomPage({ params }: { params: Promise<{ roomId: str
         </button>
       </div>
 
-      {/* TODO: room.msgCount + room.msgLimit API에서 받아오기 */}
       <div className="flex items-center justify-between px-5 py-3 bg-background border-b border-border shrink-0">
         <span className="text-[12px] text-muted">
-          32 of <span className="text-foreground font-semibold">50</span> messages used
+          {/* TODO: room.msgCount API에서 받아오기 */}
+          32 of <span className="text-foreground font-semibold">{msgLimit}</span> messages used
         </span>
         <button
           onClick={() => setShowCoinModal(true)}
           className="flex items-center gap-1 bg-primary rounded-full px-3 py-1.5 text-[11px] font-semibold text-foreground"
         >
           <span className="w-3.5 h-3.5 rounded-full bg-surface flex items-center justify-center text-[9px] font-black text-primary">W</span>
-          Extend for 20
+          Extend for {coinAmount}
         </button>
       </div>
 
@@ -149,12 +194,11 @@ export default function ChatRoomPage({ params }: { params: Promise<{ roomId: str
                 <p className="text-[12px] text-foreground/70">WLD Coin</p>
               </div>
 
-              {/* TODO: 실제 잔액은 세션/컨텍스트에서 가져오기 */}
               <div className="flex items-center justify-between bg-background rounded-xl px-4 py-4 mb-5">
                 <span className="text-[13px] text-muted">Balance</span>
                 <span className="text-[16px] font-bold text-foreground flex items-center gap-1.5">
                   <span className="w-5 h-5 rounded-full bg-primary flex items-center justify-center text-[11px] font-black text-surface">W</span>
-                  120 coins
+                  {balance === null ? '...' : balance} WLD
                 </span>
               </div>
 
@@ -175,14 +219,27 @@ export default function ChatRoomPage({ params }: { params: Promise<{ roomId: str
 
               <textarea
                 rows={2}
+                value={memo}
+                onChange={(e) => setMemo(e.target.value)}
                 placeholder="Add a note (optional) — let them know you care"
-                className="w-full border border-border rounded-xl px-4 py-3 text-[13px] outline-none resize-none mb-5 font-sans bg-background text-foreground placeholder:text-subtle"
+                className="w-full border border-border rounded-xl px-4 py-3 text-[13px] outline-none resize-none mb-3 font-sans bg-background text-foreground placeholder:text-subtle"
               />
 
-              <button onClick={sendCoin} className="w-full bg-primary text-foreground font-bold py-3.5 rounded-2xl text-[15px]">
-                Send World Coin
+              {coinError && (
+                <p className="text-red-500 text-[12px] text-center mb-3">{coinError}</p>
+              )}
+
+              <button
+                onClick={sendCoin}
+                disabled={coinLoading}
+                className="w-full bg-primary text-foreground font-bold py-3.5 rounded-2xl text-[15px] disabled:opacity-60"
+              >
+                {coinLoading ? 'Processing...' : 'Send World Coin'}
               </button>
-              <button onClick={() => setShowCoinModal(false)} className="w-full text-muted text-[13px] py-3 mt-1.5">
+              <button
+                onClick={() => { setShowCoinModal(false); setCoinError(null) }}
+                className="w-full text-muted text-[13px] py-3 mt-1.5"
+              >
                 Cancel
               </button>
             </div>

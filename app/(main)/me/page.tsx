@@ -1,13 +1,8 @@
 'use client'
 
-// GET /api/users/me → { nickname, age, gender, stats, walletAddress }
-// 코인 잔액: GET /api/users/me/balance → walletAddress로 온체인에서 조회
-// 프로필 수정: PATCH /api/users/me { nickname | age | gender }
-// 알림 설정: PATCH /api/users/me/settings { notifications: bool }
-// 랜덤 제외: PATCH /api/users/me/settings { excludeFromRandom: bool }
-// 로그아웃: DELETE /api/auth/session → 쿠키 삭제 → router.push('/')
-
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import type { CoinTransaction } from '@/shared/lib/coin-store'
 
 // TODO: GET /api/users/me 데이터로 교체
 const stats = [
@@ -30,6 +25,38 @@ function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
 export default function MePage() {
   const [notifOn, setNotifOn] = useState(true)
   const [excludeRandom, setExcludeRandom] = useState(false)
+  const [balance, setBalance] = useState<string | null>(null)
+  const [walletAddress, setWalletAddress] = useState<string>('')
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [showChargeModal, setShowChargeModal] = useState(false)
+  const [history, setHistory] = useState<CoinTransaction[]>([])
+  const router = useRouter()
+
+  useEffect(() => {
+    fetch('/api/users/me/balance')
+      .then((r) => r.json())
+      .then(({ balance: bal, address }) => {
+        setBalance(bal)
+        if (address) setWalletAddress(address)
+      })
+      .catch(() => setBalance('0'))
+  }, [])
+
+  async function openHistory() {
+    const res = await fetch('/api/users/me/coin-history')
+    const { transactions } = await res.json()
+    setHistory(transactions)
+    setShowHistoryModal(true)
+  }
+
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    router.push('/')
+  }
+
+  const shortAddress = walletAddress
+    ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
+    : '—'
 
   return (
     <div className="h-full overflow-y-auto bg-background scrollbar-hide">
@@ -47,23 +74,25 @@ export default function MePage() {
           ))}
         </div>
 
-        {/* TODO: 잔액은 GET /api/users/me/balance, 지갑 주소는 세션에서 가져오기 */}
         <div className="bg-linear-to-br from-primary to-secondary rounded-2xl p-4.5 mb-4.5 relative overflow-hidden">
           <div className="absolute w-36 h-36 rounded-full bg-white/15 -top-12 -right-10 pointer-events-none" />
-          <p className="text-[12px] text-foreground/70 mb-1.5 relative">My World Coin Balance (0xcb***)</p>
+          <p className="text-[12px] text-foreground/70 mb-1.5 relative">My World Coin Balance ({shortAddress})</p>
           <div className="flex items-center gap-2 mb-3.5 relative">
             <span className="w-6.5 h-6.5 rounded-full bg-surface flex items-center justify-center text-[13px] font-black text-primary">W</span>
-            <span className="text-[28px] font-black text-foreground">120</span>
+            <span className="text-[28px] font-black text-foreground">
+              {balance === null ? '...' : balance}
+            </span>
+            <span className="text-[14px] font-semibold text-foreground/70 mt-1">WLD</span>
           </div>
           <div className="flex gap-2 relative">
             <button
-              onClick={() => { /* TODO: MiniKit.commandsAsync.pay 로 충전, 또는 Worldcoin 앱 딥링크 */ }}
+              onClick={() => setShowChargeModal(true)}
               className="flex-1 bg-foreground text-surface rounded-xl py-2.5 text-[13px] font-bold"
             >
               Charge Coins
             </button>
             <button
-              onClick={() => { /* TODO: GET /api/users/me/coin-history → 모달에서 표시 */ }}
+              onClick={openHistory}
               className="flex-1 bg-white/40 text-foreground rounded-xl py-2.5 text-[13px] font-bold"
             >
               History
@@ -195,12 +224,90 @@ export default function MePage() {
         </div>
 
         <button
-          onClick={() => { /* TODO: DELETE /api/auth/session → router.push('/') */ }}
+          onClick={handleLogout}
           className="w-full bg-surface border border-border rounded-2xl py-3.5 text-[14px] text-muted shadow-sm"
         >
           Log Out
         </button>
       </div>
+
+      {/* 사용 내역 모달 */}
+      {showHistoryModal && (
+        <div className="fixed inset-0 z-50 flex items-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowHistoryModal(false)} />
+          <div className="relative w-full bg-surface rounded-t-3xl pb-8 pt-2 shadow-2xl max-h-[70dvh] flex flex-col">
+            <div className="w-10 h-1 rounded-full bg-border mx-auto mb-4 shrink-0" />
+            <div className="flex items-center justify-between px-5 mb-4 shrink-0">
+              <h2 className="text-[17px] font-bold text-foreground">Coin History</h2>
+              <button onClick={() => setShowHistoryModal(false)} className="text-muted text-xl leading-none">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 scrollbar-hide">
+              {history.length === 0 ? (
+                <p className="text-center text-[13px] text-muted py-8">No transactions yet</p>
+              ) : (
+                history.map((tx) => (
+                  <div key={tx.id} className="flex items-center justify-between py-3.5 border-b border-border last:border-b-0">
+                    <div>
+                      <p className="text-[14px] font-semibold text-foreground">
+                        Chat extended +{tx.amount} messages
+                      </p>
+                      <p className="text-[11px] text-subtle mt-0.5">
+                        {new Date(tx.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                    <span className="text-[14px] font-bold text-foreground">-{tx.amount} WLD</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 충전 안내 모달 */}
+      {showChargeModal && (
+        <div className="fixed inset-0 z-50 flex items-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowChargeModal(false)} />
+          <div className="relative w-full bg-surface rounded-t-3xl pb-8 pt-2 shadow-2xl">
+            <div className="w-10 h-1 rounded-full bg-border mx-auto mb-4" />
+            <div className="flex items-center justify-between px-5 mb-5">
+              <h2 className="text-[17px] font-bold text-foreground">Get WLD Coins</h2>
+              <button onClick={() => setShowChargeModal(false)} className="text-muted text-xl leading-none">✕</button>
+            </div>
+            <div className="px-5">
+              <div className="bg-background rounded-2xl p-4 mb-5 text-center">
+                <p className="text-[32px] mb-2">🌍</p>
+                <p className="text-[15px] font-bold text-foreground mb-1.5">WLD is available in World App</p>
+                <p className="text-[13px] text-muted leading-relaxed">
+                  You can receive WLD through World App grants or purchase it on supported exchanges.
+                </p>
+              </div>
+              <div className="space-y-2 mb-5">
+                <div className="flex items-center gap-3 bg-background rounded-xl px-4 py-3.5">
+                  <span className="text-[20px]">✅</span>
+                  <div>
+                    <p className="text-[13px] font-semibold text-foreground">World ID Verified</p>
+                    <p className="text-[11px] text-muted">Verified humans receive WLD grants monthly</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 bg-background rounded-xl px-4 py-3.5">
+                  <span className="text-[20px]">💱</span>
+                  <div>
+                    <p className="text-[13px] font-semibold text-foreground">Exchange</p>
+                    <p className="text-[11px] text-muted">Buy WLD on Binance, Coinbase, and others</p>
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowChargeModal(false)}
+                className="w-full bg-primary text-foreground font-bold py-3.5 rounded-2xl text-[15px]"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
